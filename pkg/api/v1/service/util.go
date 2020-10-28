@@ -18,14 +18,19 @@ package service
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	utilnet "k8s.io/utils/net"
 )
 
 const (
 	defaultLoadBalancerSourceRanges = "0.0.0.0/0"
+
+	// Annotation for customized health check port and path
+	healthCheckPort = "pingcap.com/health-check-port"
+	healthCheckPath = "pingcap.com/health-check-path"
 )
 
 // IsAllowAll checks whether the utilnet.IPNet allows traffic from 0.0.0.0/0
@@ -89,9 +94,24 @@ func GetServiceHealthCheckPathPort(service *v1.Service) (string, int32) {
 	if !NeedsHealthCheck(service) {
 		return "", 0
 	}
-	port := service.Spec.HealthCheckNodePort
+
+	var port int32 = service.Spec.HealthCheckNodePort
+	path := "/healthz"
+	// Using service annotation for port and path if exist and valid,
+	// otherwise fallback to svc.Spec.HealthCheckNodePort and /healthz
+	if service.Annotations != nil {
+		if p, ok := service.Annotations[healthCheckPort]; ok {
+			pi, err := strconv.Atoi(p)
+			if err == nil {
+				port = int32(pi)
+			}
+		}
+		if strings.HasPrefix(service.Annotations[healthCheckPath], "/") {
+			path = service.Annotations[healthCheckPath]
+		}
+	}
 	if port == 0 {
 		return "", 0
 	}
-	return "/healthz", port
+	return path, port
 }

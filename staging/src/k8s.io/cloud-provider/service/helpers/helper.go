@@ -18,6 +18,7 @@ package helpers
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	v1 "k8s.io/api/core/v1"
@@ -36,6 +37,10 @@ const (
 	// services to ensure the Service resource is not fully deleted until
 	// the correlating load balancer resources are deleted.
 	LoadBalancerCleanupFinalizer = "service.kubernetes.io/load-balancer-cleanup"
+
+	// Annotation for customized health check port and path
+	healthCheckPort = "pingcap.com/health-check-port"
+	healthCheckPath = "pingcap.com/health-check-path"
 )
 
 // IsAllowAll checks whether the utilnet.IPNet allows traffic from 0.0.0.0/0
@@ -82,11 +87,25 @@ func GetServiceHealthCheckPathPort(service *v1.Service) (string, int32) {
 	if !NeedsHealthCheck(service) {
 		return "", 0
 	}
-	port := service.Spec.HealthCheckNodePort
+	var port int32 = service.Spec.HealthCheckNodePort
+	path := "/healthz"
+	// Using service annotation for port and path if exist and valid,
+	// otherwise fallback to svc.Spec.HealthCheckNodePort and /healthz
+	if service.Annotations != nil {
+		if p, ok := service.Annotations[healthCheckPort]; ok {
+			pi, err := strconv.Atoi(p)
+			if err == nil {
+				port = int32(pi)
+			}
+		}
+		if strings.HasPrefix(service.Annotations[healthCheckPath], "/") {
+			path = service.Annotations[healthCheckPath]
+		}
+	}
 	if port == 0 {
 		return "", 0
 	}
-	return "/healthz", port
+	return path, port
 }
 
 // RequestsOnlyLocalTraffic checks if service requests OnlyLocal traffic.
